@@ -1,10 +1,7 @@
 package main
 
 import (
-	"crypto/sha1"
-	"encoding/hex"
 	"encoding/json"
-	"encoding/xml"
 	"io/ioutil"
 	"log"
 	"net/http"
@@ -26,9 +23,9 @@ func login(rw http.ResponseWriter, req *http.Request) {
 		rw.Write([]byte("400 - Email and password can't be passed"))
 	}
 	log.Println(user.Email)
-
+	// get sendspace session token
 	var sendspace_token sendspace.SendspaceSessionToken
-	sendspace_token, err = getSendspaceToken()
+	sendspace_token, err = sendspace.RetrieveSendspaceToken()
 	if err != nil || strings.Contains(sendspace_token.Result, "fail") {
 		rw.WriteHeader(http.StatusBadRequest)
 		rw.Write([]byte("400 - Login to sendspace failed!" + ".Sendspace result:" + sendspace_token.Result))
@@ -37,8 +34,8 @@ func login(rw http.ResponseWriter, req *http.Request) {
 	}
 	log.Println(sendspace_token.Token)
 
-	var mediafire_token mediafire.MediafireSessionToken
-	mediafire_token, err = getMediafireToken(user)
+	// get mediafire session token
+	mediafire_token, err := mediafire.RetrieveMediafireToken(user)
 	log.Println(mediafire_token.Token + ".Time:" + mediafire_token.Time)
 	if err != nil || mediafire_token.Result == "Error" {
 		rw.WriteHeader(http.StatusBadRequest)
@@ -50,34 +47,11 @@ func login(rw http.ResponseWriter, req *http.Request) {
 		log.Println("Sendspace successful:" + sendspace_token.Result)
 		log.Println("Mediafire successful:" + mediafire_token.Result)
 	}
-}
-
-func getSendspaceToken() (sendspace.SendspaceSessionToken, error) {
-	var sendspaceKey = os.Getenv("SENDSPACE_KEY")
-	log.Println("Sendspace API key env: " + sendspaceKey)
-	resp, err := http.Get("http://api.sendspace.com/rest/?method=auth.createtoken&api_key=" + sendspaceKey + "&api_version=1.0&response_format=xml&app_version=0.1")
-	body, err := ioutil.ReadAll(resp.Body)
-	log.Println(string(body))
-	var token sendspace.SendspaceSessionToken
-	err = xml.Unmarshal(body, &token)
-	return token, err
-}
-
-func getMediafireToken(user common.User) (mediafire.MediafireSessionToken, error) {
-	var mediafireAPIKey = os.Getenv("MEDIAFIRE_API_KEY")
-	var applicationID = os.Getenv("API_ID")
-	log.Println("Mediafire API key env: " + mediafireAPIKey)
-	log.Println("Application ID:" + applicationID)
-	var hashValue = user.Email + user.Password + applicationID + mediafireAPIKey
-	h := sha1.New()
-	h.Write([]byte(hashValue))
-	var signature = hex.EncodeToString(h.Sum(nil))
-	resp, err := http.Get("https://www.mediafire.com/api/1.1/user/get_session_token.php?email=" + user.Email + "&password=" + user.Password + "&application_id=" + applicationID + "&signature=" + signature + "&token_version=2")
-	body, err := ioutil.ReadAll(resp.Body)
-	log.Println(string(body))
-	var token mediafire.MediafireSessionToken
-	err = xml.Unmarshal(body, &token)
-	return token, err
+	m_common_root_folder := mediafire.ReadRootMediafireFolderTree(mediafire_token)
+	common.ReadFolderTree(&m_common_root_folder)
+	for _, file := range m_common_root_folder.Files {
+		log.Println("readFolderTree File in " + file.Name + ": " + file.Name + ",Link:" + file.DownloadLink)
+	}
 }
 
 func main() {

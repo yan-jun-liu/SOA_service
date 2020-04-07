@@ -81,6 +81,23 @@ type Link struct {
 	DownloadLink string   `xml:"normal_download"`
 }
 
+type DownloadContent struct {
+	Action string              `xml:"action"`
+	Links  DirectDownloadLinks `xml:"links"`
+	Result string              `xml:"result"`
+}
+
+type DirectDownloadLinks struct {
+	XMLName xml.Name             `xml:"links"`
+	Link    []DirectDownloadLink `xml:"link"`
+}
+
+type DirectDownloadLink struct {
+	XMLName      xml.Name `xml:"link"`
+	QuickKey     string   `xml:"quickkey"`
+	DownloadLink string   `xml:"direct_download"`
+}
+
 func (m *Mediafire) CalculateMediafireSignature(url string) string {
 	secret, _ := strconv.Atoi(m.Token.SecretKey)
 	mod := secret % 256
@@ -155,12 +172,22 @@ func MediafireFoldersContentMapper(mediafire_folders_content FoldersContent, par
 	parent_folder.SetFolders(child_folders)
 }
 
-func MediafireFilesContentMapper(mediafire_files_content FilesContent, parent_folder *common.Folder) {
+func (m *Mediafire) MediafireFilesContentMapper(mediafire_files_content FilesContent, parent_folder *common.Folder) {
 	log.Println("mediafireFilesContentMapper List file size mediafire: " + fmt.Sprintf("%v", len(mediafire_files_content.FileContent.Files.FileList)))
 	files := []common.File{}
 	for _, file := range mediafire_files_content.FileContent.Files.FileList {
-		c_file := common.File{Key: file.FileKey, Name: file.FileName, Branch: parent_folder.Branch + "/" + file.FileName, DownloadLink: file.Link.DownloadLink}
-		log.Println("mediafireFilesContentMapper File Key: " + c_file.Key + ",Name:" + c_file.Name + ", Branch:" + c_file.Branch + ",File Download Link:" + c_file.DownloadLink)
+		//Get direct download link
+		url_retrieve_direct_download_link := "/api/1.1/file/get_links.php?link_type=direct_download&session_token=" + m.Token.Token + "&quick_key=" + file.FileKey + "&response_format=xml"
+		signature_mediafire := m.CalculateMediafireSignature(url_retrieve_direct_download_link)
+		resp, err := http.Get("http://www.mediafire.com" + url_retrieve_direct_download_link + "&signature=" + signature_mediafire)
+		common.ErrorHandler("Get direct download link from mediafire failed. ", err)
+		body, err := ioutil.ReadAll(resp.Body)
+		common.ErrorHandler("Read direct download link from mediafire failed. ", err)
+		var download_content DownloadContent
+		err = xml.Unmarshal(body, &download_content)
+		common.ErrorHandler("Convert direct download link xml from mediafire failed. ", err)
+		download_link := download_content.Links.Link[0].DownloadLink
+		c_file := common.File{Key: file.FileKey, Name: file.FileName, Branch: parent_folder.Branch + "/" + file.FileName, FolderBranch: parent_folder.Branch, DownloadLink: download_link}
 		files = append(files, c_file)
 	}
 	parent_folder.SetFiles(files)
@@ -177,7 +204,7 @@ func (m *Mediafire) ListFoldersWithFilesFromMediafire(url string, mediafire_fold
 			url_retrieve_files := "/api/1.1/folder/get_content.php?folder_key=" + folder.FolderKey + "&session_token=" + m.Token.Token + "&content_type=files"
 			signature_mediafire := m.CalculateMediafireSignature(url_retrieve_files)
 			mediafire_file_content := RetrieveFilesFromMediafire(url_retrieve_files, signature_mediafire)
-			MediafireFilesContentMapper(mediafire_file_content, &child_folder)
+			m.MediafireFilesContentMapper(mediafire_file_content, &child_folder)
 		}
 		//Ignore empty folder
 		if folder.FolderCount != 0 {

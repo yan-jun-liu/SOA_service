@@ -1,0 +1,21 @@
+policies:
+  - type: commit
+    spec:
+      headerLength: 60
+      dco: true
+      gpg: false
+      imperative: true
+      maximumOfOneCommit: false
+      requireCommitBody: true
+      conventional:
+        types:
+          - "build"
+          - "ci"
+          - "cd"
+          - "docs"
+          - "feat"
+          - "fix"
+          - "refactor"
+          - "test"
+        scopes:
+          - "release"

@@ -15,6 +15,7 @@ import (
 	"./sendspace"
 )
 
+// UploadResponse for reading upload status response
 type UploadResponse struct {
 	Status          string
 	Message         string
@@ -22,23 +23,45 @@ type UploadResponse struct {
 	UploadFailed    []string
 }
 
+//LoginFailedResponse for handling login failed response
+type LoginFailedResponse struct {
+	Status  string
+	Message string
+}
+
 func login(rw http.ResponseWriter, req *http.Request) {
+	enableCors(&rw)
+	rw.Header().Set("Content-Type", "application/json")
 	body, err := ioutil.ReadAll(req.Body)
-	log.Println(string(body))
+	bodyString := string(body)
+	log.Println("Received login info: " + bodyString)
 	var user common.User
 	err = json.Unmarshal(body, &user)
 	if err != nil {
-		rw.WriteHeader(http.StatusBadRequest)
-		rw.Write([]byte("400 - Email and password can't be passed"))
+		rw.WriteHeader(http.StatusUnauthorized)
+		loginFailedResponse := LoginFailedResponse{"Fail", "Email and password can't be passed:" + bodyString}
+		bytesMessage, err := json.Marshal(loginFailedResponse)
+		if err != nil {
+			log.Println("Json format email and password wrong:" + bodyString)
+			return
+		}
+		log.Println("Received JSON format wrong:" + bodyString)
+		rw.Write(bytesMessage)
+		return
 	}
 	log.Println(user.Email)
 	// get sendspace session token
 	sendspace := sendspace.Sendspace{}
 	err = sendspace.RetrieveSendspaceToken()
 	err = sendspace.RetrieveSessionKey(user)
-	if err != nil || strings.Contains(sendspace.Token.Result, "fail") {
-		rw.WriteHeader(http.StatusBadRequest)
-		rw.Write([]byte("400 - Login to sendspace failed!" + ".Sendspace result:" + sendspace.Token.Result))
+	if err != nil || strings.Contains(sendspace.Session.Status, "fail") {
+		rw.WriteHeader(http.StatusUnauthorized)
+		loginFailedResponse := LoginFailedResponse{"Fail", "Login to sendspace failed!.Sendspace result:" + sendspace.Session.Error.Text}
+		bytesMessage, err := json.Marshal(loginFailedResponse)
+		if err != nil {
+			return
+		}
+		rw.Write(bytesMessage)
 		log.Println("Sendspace fail:" + sendspace.Token.Result)
 		return
 	}
@@ -47,31 +70,37 @@ func login(rw http.ResponseWriter, req *http.Request) {
 	mediafire := mediafire.Mediafire{}
 	err = mediafire.RetrieveMediafireToken(user)
 	if err != nil || mediafire.Token.Result == "Error" {
-		rw.WriteHeader(http.StatusBadRequest)
-		rw.Write([]byte("400 - Login to mediafire failed!" + ". Mediafire result:" + mediafire.Token.Result))
+		rw.WriteHeader(http.StatusUnauthorized)
+		loginFailedResponse := LoginFailedResponse{"Fail", "Login to mediafire failed!" + ". Mediafire result:" + mediafire.Token.Result}
+		bytesMessage, err := json.Marshal(loginFailedResponse)
+		if err != nil {
+			return
+		}
+		rw.Write(bytesMessage)
 		log.Println("Mediafire fail:" + mediafire.Token.Result)
+		return
 	}
 
 	//Get mediafire folder tree
-	mediafire_root_folder := mediafire.ReadRootMediafireFolderTree()
+	mediafireRootFolder := mediafire.ReadRootMediafireFolderTree()
 
 	//Get sendspace folder tree
-	sendspace_root_folder := common.Folder{Key: "0"}
-	sendspace.RetrieveFolderTree(&sendspace_root_folder)
+	sendspaceRootFolder := common.Folder{Key: "0"}
+	sendspace.RetrieveFolderTree(&sendspaceRootFolder)
 	//To upload the file, requires to give a parent folder ID, create all the missing folders before upload the files
-	sendspace.CreateMissingFolders(&mediafire_root_folder, &sendspace_root_folder)
+	sendspace.CreateMissingFolders(&mediafireRootFolder, &sendspaceRootFolder)
 	//Compare two folder trees and return list missing of files in upload format
-	upload_files := common.ListMissingFiles(mediafire_root_folder, sendspace_root_folder)
+	uploadFiles := common.ListMissingFiles(mediafireRootFolder, sendspaceRootFolder)
 	var channels []<-chan string
-	for _, file := range upload_files {
+	for _, file := range uploadFiles {
 		log.Println("Branch: " + file.Branch + ", Download link:" + file.DownloadLink)
 		channels = append(channels, sendspace.UploadFile(file))
 		time.Sleep(time.Second)
 	}
 
 	success := true
-	success_files_message := []string{}
-	failed_files_names := []string{}
+	successFilesMessage := []string{}
+	failedFilesNames := []string{}
 	// wait until uploads are all done
 	for _, channel := range channels {
 		result := <-channel
@@ -85,32 +114,35 @@ func login(rw http.ResponseWriter, req *http.Request) {
 		}
 		if strings.Contains(result, "Successfully") {
 			// file upload success
-			success_files_message = append(success_files_message, message)
+			successFilesMessage = append(successFilesMessage, message)
 		} else {
 			if success {
 				success = false
 			}
-			failed_files_names = append(failed_files_names, message)
+			failedFilesNames = append(failedFilesNames, message)
 		}
 	}
 
-	rw.Header().Set("Content-Type", "application/json")
-	var upload_response UploadResponse
+	var uploadResponse UploadResponse
 	if success {
 		rw.WriteHeader(http.StatusOK)
-		upload_response = UploadResponse{"200", "Uploaded all files succeeded", success_files_message, failed_files_names}
+		uploadResponse = UploadResponse{"200", "Uploaded all files succeeded", successFilesMessage, failedFilesNames}
 	} else {
 		rw.WriteHeader(http.StatusInternalServerError)
-		upload_response = UploadResponse{"500", "Something went wrong during the upload", success_files_message, failed_files_names}
+		uploadResponse = UploadResponse{"500", "Something went wrong during the upload", successFilesMessage, failedFilesNames}
 	}
 
-	bytes_message, err := json.Marshal(upload_response)
+	bytesMessage, err := json.Marshal(uploadResponse)
 	if err != nil {
 		rw.WriteHeader(http.StatusInternalServerError)
 		return
 	}
 
-	rw.Write(bytes_message)
+	rw.Write(bytesMessage)
+}
+
+func enableCors(w *http.ResponseWriter) {
+	(*w).Header().Set("Access-Control-Allow-Origin", "*")
 }
 
 func main() {

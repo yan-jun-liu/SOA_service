@@ -27,7 +27,14 @@ type SendspaceSessionToken struct {
 }
 
 type SendspaceSessionKey struct {
-	Key string `xml:"session_key"`
+	Status string `xml:"status,attr"`
+	Error  Error  `xml:"error"`
+	Key    string `xml:"session_key"`
+}
+
+type Error struct {
+	Code string `xml:"code,attr"`
+	Text string `xml:"text,attr"`
 }
 
 type SendspaceFolders struct {

@@ -70,7 +70,13 @@ type Upload struct {
 func (s *Sendspace) RetrieveSendspaceToken() error {
 	sendspaceKey := os.Getenv("SENDSPACE_KEY")
 	resp, err := http.Get("http://api.sendspace.com/rest/?method=auth.createtoken&api_key=" + sendspaceKey + "&api_version=1.0&response_format=xml&app_version=0.1")
+	if err != nil {
+		return err
+	}
 	body, err := ioutil.ReadAll(resp.Body)
+	if err != nil {
+		return err
+	}
 	err = xml.Unmarshal(body, &s.Token)
 	common.ErrorHandler("Read session token from sendspace went wrong: ", err)
 	return err

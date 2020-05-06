@@ -6,7 +6,6 @@ import (
 	"io/ioutil"
 	"log"
 	"net/http"
-	"os"
 	"strings"
 	"time"
 
@@ -53,6 +52,10 @@ func login(rw http.ResponseWriter, req *http.Request) {
 	// get sendspace session token
 	sendspace := sendspace.Sendspace{}
 	err = sendspace.RetrieveSendspaceToken()
+	if err != nil {
+		log.Println(err)
+		return
+	}
 	err = sendspace.RetrieveSessionKey(user)
 	if err != nil || strings.Contains(sendspace.Session.Status, "fail") {
 		rw.WriteHeader(http.StatusUnauthorized)
@@ -146,13 +149,9 @@ func enableCors(w *http.ResponseWriter) {
 }
 
 func main() {
-	os.Setenv("SENDSPACE_KEY", "")
-	os.Setenv("MEDIAFIRE_API_KEY", "")
-	os.Setenv("MEDIAFIRE_API_ID", "")
-
 	mux := http.NewServeMux()
 	mux.HandleFunc("/login", login)
 
-	log.Println("Starting server on :8081...Container:8080.....")
+	log.Println("Starting server on 8080.....")
 	log.Fatal(http.ListenAndServe(":8080", mux))
 }
